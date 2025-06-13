@@ -31,6 +31,7 @@ export function TypingArea({
   const [errorCount, setErrorCount] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const lastSampleTime = useRef<number>(0);
+  const MAX_LINE_LENGTH = 60; // Maximum characters per line
 
   const {
     addWPMSample,
@@ -142,74 +143,53 @@ export function TypingArea({
     };
   }, [hasStartedTyping]);
 
-  const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (timeLeft === 0) return;
-
-    if (!hasStartedTyping) {
-      setHasStartedTyping(true);
-      lastSampleTime.current = Date.now();
-    }
-
-    const currentValue = currentText;
-    const targetText = snippet.code;
-
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      if (settings.soundEffects) playEnter();
-      
-      const indentationRule = getIndentationForLanguage(snippet);
-      const { indentation, shouldIncrease } = calculateIndentation(currentValue, cursorPosition, indentationRule);
-      
-      const newIndentation = shouldIncrease 
-        ? indentation + indentationRule.indentationString 
-        : indentation;
-
-      const newText = currentValue.slice(0, cursorPosition) + 
-                     '\n' + newIndentation +
-                     currentValue.slice(cursorPosition);
-      
-      onType(newText);
-      setCursorPosition(cursorPosition + 1 + newIndentation.length);
-    } else if (e.key === 'Tab') {
-      e.preventDefault();
-      if (settings.soundEffects) playKeyPress();
-      
-      const indentationRule = getIndentationForLanguage(snippet);
-      const newText = currentValue.slice(0, cursorPosition) + 
-                     indentationRule.indentationString + 
-                     currentValue.slice(cursorPosition);
-      onType(newText);
-      setCursorPosition(cursorPosition + indentationRule.indentationString.length);
-    } else if (e.key === 'Backspace') {
-      if (cursorPosition > 0) {
-        if (settings.soundEffects) playBackspace();
-        const newText = currentValue.slice(0, cursorPosition - 1) + currentValue.slice(cursorPosition);
-        onType(newText);
-        setCursorPosition(cursorPosition - 1);
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (!hasStartedTyping) {
+        setHasStartedTyping(true);
       }
-    } else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
-      const expectedChar = targetText[cursorPosition];
-      const isCorrect = e.key === expectedChar;
-      
-      // ? No matter if the character is correct or not, it should be inserted
-      const newText = currentValue.slice(0, cursorPosition) + e.key + currentValue.slice(cursorPosition);
-      onType(newText);
-      setCursorPosition(cursorPosition + 1);
 
-      if (isCorrect) {
-        if (settings.soundEffects) playKeyPress();
-        // Check if this was the last character
-        if (newText === targetText) {
-          calculateAndUpdateStats();
-          const elapsedTime = (30 - timeLeft);
-          setComplete(elapsedTime);
+      // Handle special keys
+      if (e.key === "Backspace") {
+        e.preventDefault();
+        if (cursorPosition > 0) {
+          onType(currentText.slice(0, cursorPosition - 1) + currentText.slice(cursorPosition));
+          setCursorPosition(cursorPosition - 1);
         }
+        return;
+      }
+
+      // Only handle printable characters
+      if (e.key.length !== 1 || e.metaKey || e.ctrlKey) {
+        return;
+      }
+
+      e.preventDefault();
+
+      // Check if adding this character would make the current line too long
+      const newText = currentText.slice(0, cursorPosition) + e.key + currentText.slice(cursorPosition);
+      const lines = newText.slice(0, cursorPosition + 1).split('\n');
+      const currentLine = lines[lines.length - 1];
+
+      if (currentLine.length >= MAX_LINE_LENGTH) {
+        // Automatically insert a newline
+        const textBeforeCursor = currentText.slice(0, cursorPosition);
+        const textAfterCursor = currentText.slice(cursorPosition);
+        const newTextWithLineBreak = textBeforeCursor + '\n' + e.key + textAfterCursor;
+        onType(newTextWithLineBreak);
+        setCursorPosition(cursorPosition + 2); // +2 for newline and new character
       } else {
-        if (settings.soundEffects) playError();
+        onType(newText);
+        setCursorPosition(cursorPosition + 1);
+      }
+
+      // Check for errors
+      if (e.key !== snippet.code[cursorPosition]) {
         setErrorCount(prev => prev + 1);
       }
-    }
-  }, [timeLeft, hasStartedTyping, currentText, snippet, cursorPosition, onType, setCursorPosition, calculateAndUpdateStats, setComplete, settings.soundEffects, playKeyPress, playError, playEnter, playBackspace]);
+    },
+    [cursorPosition, currentText, onType, setCursorPosition, hasStartedTyping, snippet.code]
+  );
 
   // Bind keyboard events
   useEffect(() => {
@@ -234,7 +214,7 @@ export function TypingArea({
     return (
       <div 
         ref={containerRef}
-        className="relative font-mono text-xl leading-relaxed whitespace-pre-wrap outline-none"
+        className="relative font-mono text-xl leading-relaxed whitespace-pre-wrap outline-none max-w-[80ch] mx-auto"
         tabIndex={0}
         {...bind()}
       >
